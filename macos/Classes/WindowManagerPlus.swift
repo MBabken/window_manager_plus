@@ -89,7 +89,8 @@ public class WindowManagerPlus: NSObject, NSWindowDelegate {
                 backing: .buffered, defer: false)
             
             let flutterViewController = FlutterViewController(project: project)
-            window.contentViewController = flutterViewController
+            let macOSWindowUtilsViewController = MacOSWindowUtilsViewController(flutterViewController: flutterViewController)
+            window.contentViewController = macOSWindowUtilsViewController
             
             RegisterGeneratedPlugins(flutterViewController)
             
@@ -677,5 +678,107 @@ public class WindowManagerPlus: NSObject, NSWindowDelegate {
     
     deinit {
         debugPrint("WindowManagerPlus dealloc")
+    }
+}
+
+
+public class MacOSWindowUtilsViewController: NSViewController {
+    private var _flutterViewController : FlutterViewController? = nil;
+    public var flutterViewController: FlutterViewController {
+        get { return _flutterViewController! }
+    }
+    private var visualEffectSubviewRegistry = VisualEffectSubviewRegistry()
+
+    public init(flutterViewController: FlutterViewController? = nil) {
+        self._flutterViewController = flutterViewController ?? FlutterViewController()
+        
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required public init?(coder: NSCoder) {
+        fatalError()
+    }
+
+    override public func loadView() {
+        let newVisualEffectView = NSVisualEffectView()
+        newVisualEffectView.autoresizingMask = [.width, .height]
+        newVisualEffectView.blendingMode = .behindWindow
+        newVisualEffectView.state = .followsWindowActiveState
+        if #available(macOS 10.14, *) {
+            newVisualEffectView.material = .sidebar
+        }
+        self.view = newVisualEffectView
+    }
+
+    override public func viewDidLoad() {
+        super.viewDidLoad()
+
+        self.addChild(flutterViewController)
+
+        flutterViewController.view.frame = self.view.bounds
+        flutterViewController.view.autoresizingMask = [.width, .height]
+        
+        // Since Flutter 3.7.0 the FlutterViewController's background is black by default and therefore needs to be set to clear.
+        flutterViewController.backgroundColor = NSColor(
+            red: 0xF0 / 255.0,
+            green: 0x90 / 255.0,
+            blue: 0x93 / 255.0,
+            alpha: 0.7
+        )
+        //flutterViewController.backgroundColor = .clear
+        
+        self.view.addSubview(flutterViewController.view)
+    }
+    
+    public func addVisualEffectSubview(_ visualEffectSubview: VisualEffectSubview) -> UInt {
+        self.view.addSubview(visualEffectSubview, positioned: .below, relativeTo: flutterViewController.view)
+        return visualEffectSubviewRegistry.registerSubview(visualEffectSubview)
+    }
+    
+    public func getVisualEffectSubview(_ subviewId: UInt) -> VisualEffectSubview? {
+        return visualEffectSubviewRegistry.getSubviewFromId(subviewId)
+    }
+    
+    public func removeVisualEffectSubview(_ subviewId: UInt) {
+        let visualEffectSubview = visualEffectSubviewRegistry.getSubviewFromId(subviewId)
+        visualEffectSubview?.removeFromSuperview()
+        visualEffectSubviewRegistry.deregisterSubview(subviewId)
+    }
+}
+
+public class VisualEffectSubview: NSVisualEffectView {
+    public override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+}
+
+class VisualEffectSubviewRegistry {
+    /// Maps subview IDs to subview instances.
+    private var idToSubview: [UInt: VisualEffectSubview] = [:]
+    
+    /// The ID value of the subview that is going to be registered next.
+    private var nextSubviewId: UInt = 0
+    
+    /// Returns a new, yet unused ID value.
+    private func getNewId() -> UInt {
+        nextSubviewId += 1
+        return nextSubviewId - 1
+    }
+    
+    /// Registers a subview and returns its ID.
+    public func registerSubview(_ subview: VisualEffectSubview) -> UInt {
+        let subviewId = getNewId()
+        idToSubview[subviewId] = subview
+        return subviewId
+    }
+    
+    /// Deregisters a subview.
+    public func deregisterSubview(_ id: UInt) {
+        idToSubview.removeValue(forKey: id)
+    }
+    
+    /// Returns the subview with the given ID. Returns nil if the function is unused.
+    public func getSubviewFromId(_ subviewId: UInt) -> VisualEffectSubview? {
+        return idToSubview[subviewId]
     }
 }
